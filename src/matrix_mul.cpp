@@ -135,7 +135,7 @@ void Tensor::backmul(){
         for(int i = 0; i<this->rows;i++){
             for(int j = 0;j<this->right->rows;j++){
                 for(int k = 0;k<this->cols;k++){
-                    left->grad[i][k] += this->grad[i][k] * right->data[j][k];
+                    left->grad[i][j] += this->grad[i][k] * right->data[j][k];
                 }
             }
         }
@@ -144,7 +144,7 @@ void Tensor::backmul(){
         for(int i = 0;i<this->left->cols;i++){
             for(int j = 0;j<this->cols;j++){
                 for(int k = 0;k<this->rows;k++){
-                    right->grad[j][i] += this->grad[k][j] * left->data[k][i];
+                    right->grad[i][j] += this->grad[k][j] * left->data[k][i];
                 }
             }
         }

@@ -1,85 +1,3 @@
-// #include <iostream>
-// #include <string.h>
-// #include <set>
-// #include <memory>
-// #include "matrix_mul.h"
-
-// using namespace std;
-
-// int main() {
-//     float data[2][2] = {{1, 2}, {3, 4}};
-//     float data2[2][2] = {{5, 6}, {7, 8}};
-
-//     float **data_ptr = (float **)malloc(2 * sizeof(float *));
-//     for (int i = 0; i < 2; i++) {
-//         data_ptr[i] = (float *)malloc(2 * sizeof(float));
-//         memcpy(data_ptr[i], data[i], 2 * sizeof(float));
-//     }
-
-//     Tensor t1(2, 2, data_ptr, std::set<Tensor>(), "t1");
-//     Tensor t2(2, 2, data_ptr, std::set<Tensor>(), "t2");
-
-//     Tensor t3;
-//     t3 = t1 + t2;
-//     t3 = t2 + t3;
-//     std::set<std::shared_ptr<Tensor>> child1;
-//     for (const auto& c : t3.child) {
-//         child1.insert(c);
-//     }
-
-//     std::set<std::shared_ptr<Tensor>> visited;
-//     cout << "in main ----/" << endl;
-
-//     for (const auto& c : child1) {
-//         if (visited.find(c) != visited.end()) {
-//             cout << "already visited " << c->name << endl;
-//             continue;
-//         }
-//         for (const auto& c1 : c->child) {
-//             cout << c1->name << endl;
-//         }
-//         cout << "Hello " << endl;
-//         cout << c->name << endl;
-//         visited.insert(c);
-//     }
-//     cout << "in main ----/" << endl;
-
-//     for (int i = 0; i < t3.rows; i++) {
-//         for (int j = 0; j < t3.cols; j++) {
-//             cout << t3.data[i][j] << " ";
-//         }
-//         cout << endl;
-//     }
-
-//     float **grad = (float **)malloc(2 * sizeof(float *));
-//     for (int i = 0; i < t3.rows; i++) {
-//         grad[i] = (float *)malloc(2 * sizeof(float));
-//         for (int j = 0; j < t3.cols; j++) {
-//             grad[i][j] = 1;
-//         }
-//     }
-
-//     t3.setGrad(grad);
-//     t3.backward();
-
-//     for (int i = 0; i < t1.rows; i++) {
-//         for (int j = 0; j < t1.cols; j++) {
-//             cout << t1.grad[i][j] << " ";
-//         }
-//         cout << endl;
-//     }
-
-//     // Cleanup allocated memory
-//     for (int i = 0; i < 2; i++) {
-//         free(data_ptr[i]);
-//         free(grad[i]);
-//     }
-//     free(data_ptr);
-//     free(grad);
-
-//     return 0;
-// }
-
 #include <iostream>
 #include <memory>
 #include <matrix_mul.h>
@@ -115,44 +33,38 @@ public:
     {
         ptr = nullptr;
     };
+    // Constructor from Tensor pointer
+    explicit Value(Tensor* t)
+    {
+        ptr = t;
+    }
     Value(int row, int cols, float **data, std::string name)
     {
         ptr = boost::intrusive_ptr<Tensor>(new Tensor(row, cols, data, name));
     }
     // Overload + operator to create a new object
-    Value operator=(const Value &other)
+    Value& operator=(const Value &other)
     {
-        ptr = other.ptr;
+        if (this != &other) {
+            ptr = other.ptr;
+        }
         return *this;
     }
     Value operator+(const Value &other) const
     {
-        Value obj;
-        Tensor result = *ptr + *other.ptr;
-        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
-        return obj;
+        return Value(new Tensor(*ptr + *other.ptr));
     }
     Value operator*(const Value &other) const
     {
-        Value obj;
-        Tensor result = *ptr * *other.ptr;
-        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
-        return obj;
+        return Value(new Tensor(*ptr * *other.ptr));
     }
     Value operator^(const Value &other) const
     {
-        Value obj;
-        Tensor result = *ptr ^ *other.ptr;
-        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
-        return obj;
+        return Value(new Tensor(*ptr ^ *other.ptr));
     }
-
     Value operator/(const Value &other) const
     {
-        Value obj;
-        Tensor result = *ptr / *other.ptr;
-        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
-        return obj;
+        return Value(new Tensor(*ptr / *other.ptr));
     }
 
     void setgrad(float **grad)
@@ -167,6 +79,14 @@ public:
     void backward()
     {
         ptr->backward();
+    }
+    void printgrad(){
+        for(int i = 0 ;i<ptr->rows;i++){
+            for(int j = 0;j<ptr->cols;j++){
+                std::cout << ptr->grad[i][j] << " ";
+            }
+            std::cout << std::endl;
+        }
     }
 };
 
@@ -193,16 +113,23 @@ int main()
     }
     Value a(2, 2, data_ptr, "t1");
     Value b(2, 2, data_ptr, "t2");
-    Value c(2, 2, data_ptr, "t3");
-    a.setgrad(grad);
+    Value c;
+    // a.setgrad(grad);
 //0x55555559ae80
     // b.setChild(a);
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
 
     a.printAddress();
-
-    a = a + c; // Creates a new object, like Python behavior
-    c = a + c;
+    c = a;
+    c = c*b;
+    // for(int i = 0;i<100;i++){
+    //     if(i%2 == 0){
+            
+    //     }
+    //     c = c + a;
+    // }
+    c = c*a;
+    c.setgrad(grad);
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
 
     a.printAddress();
@@ -212,7 +139,9 @@ int main()
 
     // std::cout << "After:  a.value = " << a.getValue() << " ";
     a.printAddress();
-    a.backward();
+    c.backward();
+    a.printgrad();
+    // b.printgrad();
     // std::cout << "b.value = " << b.child.get()  << std::endl;
 
     return 0;
