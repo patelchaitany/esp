@@ -194,6 +194,7 @@ public:
     Tensor operator^(const Tensor& t) const;
 
     void backadd();
+    void backmul();
     void backward();
 
     bool operator<(const Tensor& t) const {

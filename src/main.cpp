@@ -83,6 +83,21 @@
 #include <iostream>
 #include <memory>  // For shared_ptr
 #include <matrix_mul.h>
+#include <sys/resource.h>  // For getrusage
+#include <cstring>  // For memcpy
+#include <cstdlib>  // For malloc and free
+#include <set>
+#include <string>
+
+long getPeakMemoryUsage() {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        return usage.ru_maxrss;  // Peak memory usage in kilobytes
+    } else {
+        std::cerr << "Error in getrusage" << std::endl;
+        return -1;
+    }
+}
 
 // Wrapper class to manage shared_ptr internally
 class Value{
@@ -96,7 +111,6 @@ public:
     Value(int row,int cols,float **data,std::string name){
         ptr = std::make_shared<Tensor>(row,cols,data,std::set<Tensor>(), name);
     }
-
     // Overload + operator to create a new object
     Value operator+(const Value &other) const {
         Tensor result = *ptr + *other.ptr;  // Calls MyClass operator+
@@ -104,7 +118,25 @@ public:
         obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
         return obj;
     }
-    
+    Value operator*(const Value &other) const {
+        Tensor result = *ptr * *other.ptr;  // Calls MyClass operator+
+        Value obj;
+        obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
+        return obj;
+    }
+    Value operator^(const Value &other) const {
+        Tensor result = *ptr ^ *other.ptr;  // Calls MyClass operator+
+        Value obj;
+        obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
+        return obj;
+    }
+
+    Value operator/(const Value &other) const {
+        Tensor result = *ptr / *other.ptr;  // Calls MyClass operator+
+        Value obj;
+        obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
+        return obj;
+    }
     // Print memory address (for demonstration)
     void printAddress() const {
         std::cout << "Address: " << ptr.get() << std::endl;
@@ -112,27 +144,33 @@ public:
 };
 
 int main() {
+
+    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
     float data[2][2] = {{1, 2}, {3, 4}};
     float data2[2][2] = {{5, 6}, {7, 8}};
-
     float **data_ptr = (float **)malloc(2 * sizeof(float *));
     for (int i = 0; i < 2; i++) {
         data_ptr[i] = (float *)malloc(2 * sizeof(float));
         memcpy(data_ptr[i], data[i], 2 * sizeof(float));
     }
+
     Value a(2, 2, data_ptr,"t1");
     Value b(2, 2, data_ptr,"t2");
     Value c(2, 2, data_ptr,"t3");
     // b.setChild(a);
+    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
+
     a.printAddress();
     
 
     a = a + c;  // Creates a new object, like Python behavior
+    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
+
     a.printAddress();
-    for(int i = 0;i<100;i++) {
-        a = a + c;
-        a = a + b;
-    }
+    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
+
+    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
+
     // std::cout << "After:  a.value = " << a.getValue() << " ";
     a.printAddress();
     // std::cout << "b.value = " << b.child.get()  << std::endl;

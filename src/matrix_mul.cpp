@@ -55,14 +55,6 @@ Tensor Tensor::operator+(const Tensor &t) const {
     result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
     
     result.name = this->name + "+" + t.name;
-
-    std::cout << "-----------------" << std::endl;
-    std::cout << result.name << " " << result.uuidstr << " " << t.uuidstr << " " << this->uuidstr << std::endl;
-    for (const auto& c : result.child) {
-        std::cout << c->name << " " << c->uuidstr << std::endl;
-    }
-    std::cout << "-----------------" << std::endl;
-
     for (int j = 0; j < rows; j++) {
         for (int k = 0; k < cols; k++) {
             result.data[j][k] = this->data[j][k] + t.data[j][k];
@@ -115,6 +107,10 @@ Tensor Tensor::operator*(const Tensor &t) const {
         }
     }
     return result;
+}
+
+void Tensor::backmul(){
+    
 }
 
 Tensor Tensor::operator^(const Tensor &t) const {
