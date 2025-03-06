@@ -109,7 +109,7 @@ public:
         ptr = nullptr;
     };
     Value(int row,int cols,float **data,std::string name){
-        ptr = std::make_shared<Tensor>(row,cols,data,std::set<Tensor>(), name);
+        ptr = std::make_shared<Tensor>(row,cols,data, name);
     }
     // Overload + operator to create a new object
     Value operator+(const Value &other) const {

@@ -19,7 +19,8 @@ Tensor& Tensor::operator=(const Tensor& t) {
     // Copy properties from t
     new_tensor->name = t.name;
     new_tensor->_backward = t._backward;
-    new_tensor->child = t.child;  // Share same children as t
+    new_tensor->left = t.left;   // Share same children as t
+    new_tensor->right = t.right;
     
     // Clean up current data
     data_holder.reset();
@@ -33,7 +34,8 @@ Tensor& Tensor::operator=(const Tensor& t) {
     this->grad = this->grad_holder.get();
     this->rows = new_tensor->rows;
     this->cols = new_tensor->cols;
-    this->child = std::move(new_tensor->child);
+    this->left = std::move(new_tensor->left);
+    this->right = std::move(new_tensor->right);
     this->name = std::move(new_tensor->name);
     this->_backward = new_tensor->_backward;
     
@@ -51,8 +53,8 @@ Tensor Tensor::operator+(const Tensor &t) const {
     Tensor result(this->rows, this->cols);
     
     // Store shared_ptr to the original tensors
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
+    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
+    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
     
     result.name = this->name + "+" + t.name;
     for (int j = 0; j < rows; j++) {
@@ -65,10 +67,17 @@ Tensor Tensor::operator+(const Tensor &t) const {
 }
 
 void Tensor::backadd() {
-    for (auto& c : this->child) {
+    if (left) {
         for (int i = 0; i < this->rows; i++) {
             for (int j = 0; j < this->cols; j++) {
-                c->grad[i][j] = c->grad[i][j] + this->grad[i][j];
+                left->grad[i][j] = left->grad[i][j] + this->grad[i][j];
+            }
+        }
+    }
+    if (right) {
+        for (int i = 0; i < this->rows; i++) {
+            for (int j = 0; j < this->cols; j++) {
+                right->grad[i][j] = right->grad[i][j] + this->grad[i][j];
             }
         }
     }
@@ -76,8 +85,8 @@ void Tensor::backadd() {
 
 Tensor Tensor::operator/(const Tensor &t) const {
     Tensor result(this->rows, this->cols);
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
+    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
+    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
     result.name = this->name + "/" + t.name;
 
     for (int j = 0; j < rows; j++) {
@@ -94,8 +103,8 @@ Tensor Tensor::operator*(const Tensor &t) const {
     }
 
     Tensor result(this->rows, t.cols);
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
+    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
+    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
     result.name = this->name + "*" + t.name;
 
     for (int i = 0; i < this->rows; i++) {
@@ -109,9 +118,9 @@ Tensor Tensor::operator*(const Tensor &t) const {
     return result;
 }
 
-void Tensor::backmul(){
+// void Tensor::backmul(){
     
-}
+// }
 
 Tensor Tensor::operator^(const Tensor &t) const {
     if (this->rows != t.rows || this->cols != t.cols || this->batch != t.batch) {
@@ -119,8 +128,8 @@ Tensor Tensor::operator^(const Tensor &t) const {
     }
 
     Tensor result(t.cols, t.rows);
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
-    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
+    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
+    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
     result.name = this->name + "^" + t.name;
 
     for (int i = 0; i < t.rows; i++) {
@@ -131,19 +140,22 @@ Tensor Tensor::operator^(const Tensor &t) const {
     return result;
 }
 
-void visit_tensor(const std::shared_ptr<Tensor>& t, std::set<std::string>& visited, std::vector<std::shared_ptr<Tensor>>& topo) {
+void visit_tensor(const std::shared_ptr<Tensor>& t, std::set<std::shared_ptr<Tensor>>& visited, std::vector<std::shared_ptr<Tensor>>& topo) {
     if (!t) {
         return;
     }
     
-    if (visited.find(t->uuidstr) != visited.end()) {
+    if (visited.find(t) != visited.end()) {
         return;
     }
     
-    visited.insert(t->uuidstr);
+    visited.insert(t);
     
-    for (const auto& child : t->child) {
-        visit_tensor(child, visited, topo);
+    if (t->left) {
+        visit_tensor(t->left, visited, topo);
+    }
+    if (t->right) {
+        visit_tensor(t->right, visited, topo);
     }
     
     topo.push_back(t);
@@ -151,7 +163,7 @@ void visit_tensor(const std::shared_ptr<Tensor>& t, std::set<std::string>& visit
 
 void Tensor::backward() {
     std::vector<std::shared_ptr<Tensor>> topo;
-    std::set<std::string> visited;
+    std::set<std::shared_ptr<Tensor>> visited;
     
     auto self = std::shared_ptr<Tensor>(this, [](Tensor*) {});
     visit_tensor(self, visited, topo);

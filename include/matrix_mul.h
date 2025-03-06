@@ -16,7 +16,8 @@ class Tensor {
 public:
     uuid_t id;
     int rows, cols, batch;
-    std::set<std::shared_ptr<Tensor>> child;
+    std::shared_ptr<Tensor> left;
+    std::shared_ptr<Tensor> right;
     float32** data;  // Keep as raw pointer for direct access
     float32** grad;  // Keep as raw pointer for direct access
     void (Tensor::*_backward)() = nullptr; 
@@ -38,6 +39,8 @@ public:
         this->cols = 1;
         this->name = "default";
         this->_backward = nullptr;
+        this->left = nullptr;
+        this->right = nullptr;
 
         // Allocate minimum memory for 1x1 tensor
         data_holder = std::shared_ptr<float32*[]>(new float32*[1],
@@ -59,7 +62,7 @@ public:
         grad[0] = new float32[1]();  // Initialize to zero
     }
 
-    Tensor(int rows, int cols, float32** input_data = nullptr, const std::set<Tensor>& old_child = {}, std::string name = "") {
+    Tensor(int rows, int cols, float32** input_data = nullptr, std::string name = "") {
         uuid_generate(id);
         char uuid_str[37];
         uuid_unparse(id, uuid_str);
@@ -69,11 +72,8 @@ public:
         this->cols = cols;
         this->name = name;
         this->_backward = nullptr;
-
-        // Convert old_child to shared_ptr set
-        for (const auto& t : old_child) {
-            child.insert(std::make_shared<Tensor>(t));
-        }
+        this->left = nullptr;
+        this->right = nullptr;
 
         int r = rows;
         data_holder = std::shared_ptr<float32*[]>(new float32*[r], 
@@ -116,8 +116,9 @@ public:
         this->name = t.name;
         this->_backward = t._backward;
         
-        // Copy child tensors
-        this->child = t.child;
+        // Copy child pointers
+        this->left = t.left;
+        this->right = t.right;
 
         int r = rows;
         data_holder = std::shared_ptr<float32*[]>(new float32*[r],
@@ -159,7 +160,8 @@ public:
         this->cols = t.cols;
         this->name = std::move(t.name);
         this->_backward = t._backward;
-        this->child = std::move(t.child);
+        this->left = std::move(t.left);
+        this->right = std::move(t.right);
         this->data_holder = std::move(t.data_holder);
         this->grad_holder = std::move(t.grad_holder);
         this->data = this->data_holder.get();
