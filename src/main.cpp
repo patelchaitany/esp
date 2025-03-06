@@ -29,7 +29,7 @@
 
 //     std::set<std::shared_ptr<Tensor>> visited;
 //     cout << "in main ----/" << endl;
-    
+
 //     for (const auto& c : child1) {
 //         if (visited.find(c) != visited.end()) {
 //             cout << "already visited " << c->name << endl;
@@ -81,89 +81,128 @@
 // }
 
 #include <iostream>
-#include <memory>  // For shared_ptr
+#include <memory>
 #include <matrix_mul.h>
-#include <sys/resource.h>  // For getrusage
-#include <cstring>  // For memcpy
-#include <cstdlib>  // For malloc and free
+#include <sys/resource.h>
+#include <cstring>
+#include <cstdlib>
 #include <set>
 #include <string>
+#include <boost/smart_ptr/intrusive_ptr.hpp>
 
-long getPeakMemoryUsage() {
+long getPeakMemoryUsage()
+{
     struct rusage usage;
-    if (getrusage(RUSAGE_SELF, &usage) == 0) {
-        return usage.ru_maxrss;  // Peak memory usage in kilobytes
-    } else {
+    if (getrusage(RUSAGE_SELF, &usage) == 0)
+    {
+        return usage.ru_maxrss; // Peak memory usage in kilobytes
+    }
+    else
+    {
         std::cerr << "Error in getrusage" << std::endl;
         return -1;
     }
 }
-
-// Wrapper class to manage shared_ptr internally
-class Value{
+// Wrapper class to manage intrusive_ptr internally
+class Value
+{
 public:
-    std::shared_ptr<Tensor> ptr;  // Shared pointer to manage MyClass object
+    boost::intrusive_ptr<Tensor> ptr; // Intrusive pointer to manage Tensor object
+    // std::shared_ptr<Tensor> ptr; // Shared pointer to manage MyClass object
 public:
     // Constructor
-    Value(){
+    Value()
+    {
         ptr = nullptr;
     };
-    Value(int row,int cols,float **data,std::string name){
-        ptr = std::make_shared<Tensor>(row,cols,data, name);
+    Value(int row, int cols, float **data, std::string name)
+    {
+        ptr = boost::intrusive_ptr<Tensor>(new Tensor(row, cols, data, name));
     }
     // Overload + operator to create a new object
-    Value operator+(const Value &other) const {
-        Tensor result = *ptr + *other.ptr;  // Calls MyClass operator+
+    Value operator=(const Value &other)
+    {
+        ptr = other.ptr;
+        return *this;
+    }
+    Value operator+(const Value &other) const
+    {
         Value obj;
-        obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
+        Tensor result = *ptr + *other.ptr;
+        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
         return obj;
     }
-    Value operator*(const Value &other) const {
-        Tensor result = *ptr * *other.ptr;  // Calls MyClass operator+
+    Value operator*(const Value &other) const
+    {
         Value obj;
-        obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
+        Tensor result = *ptr * *other.ptr;
+        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
         return obj;
     }
-    Value operator^(const Value &other) const {
-        Tensor result = *ptr ^ *other.ptr;  // Calls MyClass operator+
+    Value operator^(const Value &other) const
+    {
         Value obj;
-        obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
+        Tensor result = *ptr ^ *other.ptr;
+        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
         return obj;
     }
 
-    Value operator/(const Value &other) const {
-        Tensor result = *ptr / *other.ptr;  // Calls MyClass operator+
+    Value operator/(const Value &other) const
+    {
         Value obj;
-        obj.ptr = std::make_shared<Tensor>(result);  // Create new shared_ptr
+        Tensor result = *ptr / *other.ptr;
+        obj.ptr = boost::intrusive_ptr<Tensor>(new Tensor(result));
         return obj;
     }
+
+    void setgrad(float **grad)
+    {
+        ptr->setGrad(grad);
+    }
     // Print memory address (for demonstration)
-    void printAddress() const {
+    void printAddress() const
+    {
         std::cout << "Address: " << ptr.get() << std::endl;
+    }
+    void backward()
+    {
+        ptr->backward();
     }
 };
 
-int main() {
+int main()
+{
 
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
     float data[2][2] = {{1, 2}, {3, 4}};
     float data2[2][2] = {{5, 6}, {7, 8}};
     float **data_ptr = (float **)malloc(2 * sizeof(float *));
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 2; i++)
+    {
         data_ptr[i] = (float *)malloc(2 * sizeof(float));
         memcpy(data_ptr[i], data[i], 2 * sizeof(float));
     }
-
-    Value a(2, 2, data_ptr,"t1");
-    Value b(2, 2, data_ptr,"t2");
-    Value c(2, 2, data_ptr,"t3");
+    float **grad = (float **)malloc(2 * sizeof(float *));
+    for (int i = 0; i < 2; i++)
+    {
+        grad[i] = (float *)malloc(2 * sizeof(float));
+        for (int j = 0; j < 2; j++)
+        {
+            grad[i][j] = 1;
+        }
+    }
+    Value a(2, 2, data_ptr, "t1");
+    Value b(2, 2, data_ptr, "t2");
+    Value c(2, 2, data_ptr, "t3");
+    a.setgrad(grad);
+//0x55555559ae80
     // b.setChild(a);
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
 
     a.printAddress();
-    
 
-    a = a + c;  // Creates a new object, like Python behavior
+    a = a + c; // Creates a new object, like Python behavior
+    c = a + c;
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
 
     a.printAddress();
@@ -173,6 +212,7 @@ int main() {
 
     // std::cout << "After:  a.value = " << a.getValue() << " ";
     a.printAddress();
+    a.backward();
     // std::cout << "b.value = " << b.child.get()  << std::endl;
 
     return 0;

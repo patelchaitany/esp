@@ -8,16 +8,18 @@
 #include <uuid/uuid.h>
 #include <functional>
 #include <memory>
+#include <boost/smart_ptr/intrusive_ptr.hpp>
+#include <boost/smart_ptr/intrusive_ref_counter.hpp>
 
 typedef float float32;
 
-class Tensor {
+class Tensor : public boost::intrusive_ref_counter<Tensor> {
     typedef float float32;
 public:
     uuid_t id;
     int rows, cols, batch;
-    std::shared_ptr<Tensor> left;
-    std::shared_ptr<Tensor> right;
+    boost::intrusive_ptr<Tensor> left;
+    boost::intrusive_ptr<Tensor> right;
     float32** data;  // Keep as raw pointer for direct access
     float32** grad;  // Keep as raw pointer for direct access
     void (Tensor::*_backward)() = nullptr; 
@@ -167,10 +169,10 @@ public:
         this->data = this->data_holder.get();
         this->grad = this->grad_holder.get();
         
-        t.data = nullptr;
-        t.grad = nullptr;
-        t.rows = 0;
-        t.cols = 0;
+        // t.data = nullptr;
+        // t.grad = nullptr;
+        // t.rows = 0;
+        // t.cols = 0;
     }
 
     void setGrad(float32** new_grad) {

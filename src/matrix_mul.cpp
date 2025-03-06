@@ -2,6 +2,7 @@
 #include <memory>
 #include <unordered_set>
 #include <cstring>
+#include <boost/smart_ptr/intrusive_ptr.hpp>
 
 Tensor& Tensor::operator=(const Tensor& t) {
     if (this == &t) {
@@ -10,7 +11,7 @@ Tensor& Tensor::operator=(const Tensor& t) {
 
     // Create an entirely new tensor
     Tensor* new_tensor = new Tensor(t.rows, t.cols);
-    
+    // std::cout << "New tensor created\n";
     // Copy the data from t
     for (int j = 0; j < t.rows; j++) {
         memcpy(new_tensor->data[j], t.data[j], t.cols * sizeof(float32));
@@ -30,6 +31,8 @@ Tensor& Tensor::operator=(const Tensor& t) {
     // This is similar to Python's reference reassignment
     this->data_holder = std::move(new_tensor->data_holder);
     this->grad_holder = std::move(new_tensor->grad_holder);
+    // this->data_holder = new_tensor->data_holder;
+    // this->grad_holder = new_tensor->grad_holder;
     this->data = this->data_holder.get();
     this->grad = this->grad_holder.get();
     this->rows = new_tensor->rows;
@@ -37,6 +40,9 @@ Tensor& Tensor::operator=(const Tensor& t) {
     this->left = std::move(new_tensor->left);
     this->right = std::move(new_tensor->right);
     this->name = std::move(new_tensor->name);
+    // this->left = new_tensor->left;
+    // this->right = new_tensor->right;
+    // this->name = new_tensor->name;
     this->_backward = new_tensor->_backward;
     
     // Generate new UUID for this tensor
@@ -52,10 +58,9 @@ Tensor& Tensor::operator=(const Tensor& t) {
 Tensor Tensor::operator+(const Tensor &t) const {
     Tensor result(this->rows, this->cols);
     
-    // Store shared_ptr to the original tensors
-    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
-    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
-    
+    // Store intrusive_ptr to the original tensors
+    result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
+    result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
     result.name = this->name + "+" + t.name;
     for (int j = 0; j < rows; j++) {
         for (int k = 0; k < cols; k++) {
@@ -67,14 +72,14 @@ Tensor Tensor::operator+(const Tensor &t) const {
 }
 
 void Tensor::backadd() {
-    if (left) {
+    if (this->left) {
         for (int i = 0; i < this->rows; i++) {
             for (int j = 0; j < this->cols; j++) {
                 left->grad[i][j] = left->grad[i][j] + this->grad[i][j];
             }
         }
     }
-    if (right) {
+    if (this->right) {
         for (int i = 0; i < this->rows; i++) {
             for (int j = 0; j < this->cols; j++) {
                 right->grad[i][j] = right->grad[i][j] + this->grad[i][j];
@@ -85,8 +90,8 @@ void Tensor::backadd() {
 
 Tensor Tensor::operator/(const Tensor &t) const {
     Tensor result(this->rows, this->cols);
-    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
-    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
+    result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
+    result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
     result.name = this->name + "/" + t.name;
 
     for (int j = 0; j < rows; j++) {
@@ -103,10 +108,10 @@ Tensor Tensor::operator*(const Tensor &t) const {
     }
 
     Tensor result(this->rows, t.cols);
-    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
-    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
+    result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
+    result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
     result.name = this->name + "*" + t.name;
-
+    result._backward = &Tensor::backmul;
     for (int i = 0; i < this->rows; i++) {
         for (int j = 0; j < t.cols; j++) {
             result.data[i][j] = 0;
@@ -118,9 +123,33 @@ Tensor Tensor::operator*(const Tensor &t) const {
     return result;
 }
 
-// void Tensor::backmul(){
-    
-// }
+void Tensor::backmul(){
+    // A = B * C
+    // $A = B*C$
+    // $B = (3*2)$
+    // C = (2x2)
+    // dL/dA (3x2)
+    // dL/dB = dL/dA * C^T
+    // dL/dC = B^T * dL/dA
+    if(this->left){
+        for(int i = 0; i<this->rows;i++){
+            for(int j = 0;j<this->right->rows;j++){
+                for(int k = 0;k<this->cols;k++){
+                    left->grad[i][k] += this->grad[i][k] * right->data[j][k];
+                }
+            }
+        }
+    }
+    if(this->right){
+        for(int i = 0;i<this->left->cols;i++){
+            for(int j = 0;j<this->cols;j++){
+                for(int k = 0;k<this->rows;k++){
+                    right->grad[j][i] += this->grad[k][j] * left->data[k][i];
+                }
+            }
+        }
+    }
+}
 
 Tensor Tensor::operator^(const Tensor &t) const {
     if (this->rows != t.rows || this->cols != t.cols || this->batch != t.batch) {
@@ -128,8 +157,8 @@ Tensor Tensor::operator^(const Tensor &t) const {
     }
 
     Tensor result(t.cols, t.rows);
-    result.left = std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {});
-    result.right = std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {});
+    result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
+    result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
     result.name = this->name + "^" + t.name;
 
     for (int i = 0; i < t.rows; i++) {
@@ -140,7 +169,9 @@ Tensor Tensor::operator^(const Tensor &t) const {
     return result;
 }
 
-void visit_tensor(const std::shared_ptr<Tensor>& t, std::set<std::shared_ptr<Tensor>>& visited, std::vector<std::shared_ptr<Tensor>>& topo) {
+void visit_tensor(const boost::intrusive_ptr<Tensor>& t,
+                 std::set<boost::intrusive_ptr<Tensor>>& visited,
+                 std::vector<boost::intrusive_ptr<Tensor>>& topo) {
     if (!t) {
         return;
     }
@@ -162,10 +193,10 @@ void visit_tensor(const std::shared_ptr<Tensor>& t, std::set<std::shared_ptr<Ten
 }
 
 void Tensor::backward() {
-    std::vector<std::shared_ptr<Tensor>> topo;
-    std::set<std::shared_ptr<Tensor>> visited;
+    std::vector<boost::intrusive_ptr<Tensor>> topo;
+    std::set<boost::intrusive_ptr<Tensor>> visited;
     
-    auto self = std::shared_ptr<Tensor>(this, [](Tensor*) {});
+    auto self = boost::intrusive_ptr<Tensor>(this);
     visit_tensor(self, visited, topo);
 
     for (int i = topo.size() - 1; i >= 0; i--) {
