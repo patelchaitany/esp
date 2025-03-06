@@ -3,185 +3,139 @@
 #include <unordered_set>
 #include <cstring>
 
-
-Tensor &Tensor::operator=(const Tensor &t)
-{
-    if (this == &t)
+Tensor& Tensor::operator=(const Tensor& t) {
+    if (this == &t) {
         return *this;
-
-    for (int j = 0; j < rows; j++)
-    {
-        free(data[j]);
-    }
-    free(data);
-    uuid_copy(this->id, t.id);
-    this->rows = t.rows;
-    this->cols = t.cols;
-    this->batch = t.batch;
-    this->name = t.name;
-    this->uuidstr = t.uuidstr;
-    this->_backward = t._backward; // Clear existing children
-    this->grad = (float32 **)malloc(rows * sizeof(float32 *));
-    for(auto& c : t.child) {
-        this->child.insert(c);  // Insert each child individually
-    }
-    data = (float32 **)malloc(rows * sizeof(float32 **));
-    for (int j = 0; j < rows; j++)
-    {
-        data[j] = (float32 *)malloc(cols * sizeof(float32));
-        grad[j] = (float32 *)malloc(cols * sizeof(float32));
-        memcpy(data[j], t.data[j], cols * sizeof(float32));
-        memcpy(grad[j], t.grad[j], cols * sizeof(float32));
     }
 
+    // Create an entirely new tensor
+    Tensor* new_tensor = new Tensor(t.rows, t.cols);
+    
+    // Copy the data from t
+    for (int j = 0; j < t.rows; j++) {
+        memcpy(new_tensor->data[j], t.data[j], t.cols * sizeof(float32));
+    }
+
+    // Copy properties from t
+    new_tensor->name = t.name;
+    new_tensor->_backward = t._backward;
+    new_tensor->child = t.child;  // Share same children as t
+    
+    // Clean up current data
+    data_holder.reset();
+    grad_holder.reset();
+    
+    // Move the new tensor's contents into this
+    // This is similar to Python's reference reassignment
+    this->data_holder = std::move(new_tensor->data_holder);
+    this->grad_holder = std::move(new_tensor->grad_holder);
+    this->data = this->data_holder.get();
+    this->grad = this->grad_holder.get();
+    this->rows = new_tensor->rows;
+    this->cols = new_tensor->cols;
+    this->child = std::move(new_tensor->child);
+    this->name = std::move(new_tensor->name);
+    this->_backward = new_tensor->_backward;
+    
+    // Generate new UUID for this tensor
+    uuid_generate(this->id);
+    char uuid_str[37];
+    uuid_unparse(this->id, uuid_str);
+    this->uuidstr = std::string(uuid_str);
+    
+    delete new_tensor;
     return *this;
 }
 
-Tensor Tensor::operator+(const Tensor &t) const
-{
+Tensor Tensor::operator+(const Tensor &t) const {
     Tensor result(this->rows, this->cols);
-    result.child = {*this, t};
+    
+    // Store shared_ptr to the original tensors
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
+    
     result.name = this->name + "+" + t.name;
-    std::cout<<"-----------------"<<std::endl;
-    std::cout<<result.name<<" "<<result.uuidstr<<" "<<t.uuidstr<<" "<<this->uuidstr<<std::endl;
-    for(const auto &c : result.child){
-        std::cout<<c.name<<" "<<c.uuidstr<<std::endl;
-    }
-    std::cout<<"-----------------"<<std::endl;
 
-    for (int j = 0; j < rows; j++)
-    {
-        for (int k = 0; k < cols; k++)
-        {
+    std::cout << "-----------------" << std::endl;
+    std::cout << result.name << " " << result.uuidstr << " " << t.uuidstr << " " << this->uuidstr << std::endl;
+    for (const auto& c : result.child) {
+        std::cout << c->name << " " << c->uuidstr << std::endl;
+    }
+    std::cout << "-----------------" << std::endl;
+
+    for (int j = 0; j < rows; j++) {
+        for (int k = 0; k < cols; k++) {
             result.data[j][k] = this->data[j][k] + t.data[j][k];
         }
     }
-    // result._backward = [&](){
-    //     std::cout<<"Backward called : >"<<this->name<<"< >"<<t.name<<" <"<<std::endl;
-
-    //     for(int i = 0;i<this->rows;i++){
-    //         for(int j = 0;j<this->cols;j++){
-    //             std::cout<<result.grad[i][j]<<" ";
-    //             this->grad[i][j] = this->grad[i][j] + result.grad[i][j];
-    //             t.grad[i][j] = t.grad[i][j] + result.grad[i][j];
-    //         }
-    //     }
-    //     std::cout<<"-----*--------"<<std::endl;
-    // };
     result._backward = &Tensor::backadd;
     return result;
 }
-void Tensor::backadd(){
-    for(auto &c : this->child){
-        for(int i = 0;i<this->rows;i++){
-            for(int j = 0;j<this->cols;j++){
-                c.grad[i][j] = c.grad[i][j] + this->grad[i][j];
+
+void Tensor::backadd() {
+    for (auto& c : this->child) {
+        for (int i = 0; i < this->rows; i++) {
+            for (int j = 0; j < this->cols; j++) {
+                c->grad[i][j] = c->grad[i][j] + this->grad[i][j];
             }
         }
     }
 }
-Tensor Tensor::operator/(const Tensor &t) const
-{
-    Tensor result(this->rows, this->cols, {this, &t});
+
+Tensor Tensor::operator/(const Tensor &t) const {
+    Tensor result(this->rows, this->cols);
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
     result.name = this->name + "/" + t.name;
-    for (int j = 0; j < rows; j++)
-    {
-        for (int k = 0; k < cols; k++)
-        {
+
+    for (int j = 0; j < rows; j++) {
+        for (int k = 0; k < cols; k++) {
             result.data[j][k] = this->data[j][k] / t.data[j][k];
         }
     }
     return result;
 }
 
-Tensor Tensor::operator*(const Tensor &t) const
-{
-    if (this->cols != t.rows)
-    {
+Tensor Tensor::operator*(const Tensor &t) const {
+    if (this->cols != t.rows) {
         throw std::invalid_argument("Matrix dimensions do not match for multiplication");
     }
 
-    Tensor result(this->rows, t.cols, {this, &t});
+    Tensor result(this->rows, t.cols);
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
     result.name = this->name + "*" + t.name;
-    for (int i = 0; i < this->rows; i++)
-    {
-        for (int j = 0; j < t.cols; j++)
-        {
+
+    for (int i = 0; i < this->rows; i++) {
+        for (int j = 0; j < t.cols; j++) {
             result.data[i][j] = 0;
-            for (int k = 0; k < this->cols; k++)
-            {
+            for (int k = 0; k < this->cols; k++) {
                 result.data[i][j] += this->data[i][k] * t.data[k][j];
             }
         }
     }
-    //A = B*C 
-    // B = (3x2)
-    // C = (2x2)
-    //dL/dA (3x2)
-    //dL/dB = dL/dA * C^T
-    //dL/dC = B^T * dL/dA
-    float32 **temp_grad = this->grad;
-    // result._backward = [&](){
-
-    //     for(int i = 0;i<result.rows;i++){
-    //         for(int j = 0;j<t.rows;j++){
-    //             for(int k = 0;k<t.cols;k++){
-    //                 temp_grad[i][j] += result.grad[i][k] * t.data[k][j];
-    //              }
-    //         }
-    //     }
-    //     for (int i = 0; i < this->rows; i++) {
-    //         for (int j = 0; j < this->cols; j++) {
-    //             this->grad[i][j] = temp_grad[i][j];
-    //         }
-    //     }
-    //     temp_grad = t.grad;
-
-    //     for(int i = 0;i<this->cols;i++){
-    //         for(int j = 0;j<result.cols;j++){
-    //             for(int k = 0;k<result.rows;k++){
-    //                 temp_grad[i][j] += this->data[k][i] * result.grad[k][j];
-    //              }
-    //         }
-    //     }
-
-    //     for (int i = 0; i < t.rows; i++) {
-    //         for (int j = 0; j < t.cols; j++) {
-    //             t.grad[i][j] = temp_grad[i][j];
-    //         }
-    //     }
-        
-    // };
     return result;
 }
 
-
-Tensor Tensor::operator^(const Tensor &t) const
-{
-    if (this->rows != t.rows || this->cols != t.cols || this->batch != t.batch)
-    {
+Tensor Tensor::operator^(const Tensor &t) const {
+    if (this->rows != t.rows || this->cols != t.cols || this->batch != t.batch) {
         throw std::invalid_argument("Matrix dimensions do not match for dot multiplication");
-    };
+    }
 
-    Tensor result(t.cols, t.rows, {this, &t});
+    Tensor result(t.cols, t.rows);
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(this), [](Tensor*) {}));
+    result.child.insert(std::shared_ptr<Tensor>(const_cast<Tensor*>(&t), [](Tensor*) {}));
     result.name = this->name + "^" + t.name;
-    for (int i = 0; i < t.rows; i++)
-    {
-        for (int j = 0; j < t.cols; j++)
-        {
+
+    for (int i = 0; i < t.rows; i++) {
+        for (int j = 0; j < t.cols; j++) {
             result.data[j][i] = t.data[i][j];
         }
     }
-
-    // result._backward = [&](){
-    //     std::cout<<"Backward called"<<std::endl;
-    // };
-
     return result;
 }
 
-
-void visit_tensor(Tensor* t, std::set<std::string>& visited, std::vector<Tensor*>& topo) {
+void visit_tensor(const std::shared_ptr<Tensor>& t, std::set<std::string>& visited, std::vector<std::shared_ptr<Tensor>>& topo) {
     if (!t) {
         return;
     }
@@ -192,24 +146,23 @@ void visit_tensor(Tensor* t, std::set<std::string>& visited, std::vector<Tensor*
     
     visited.insert(t->uuidstr);
     
-    for (auto& child : t->child) {
-        visit_tensor(const_cast<Tensor*>(&child), visited, topo);
+    for (const auto& child : t->child) {
+        visit_tensor(child, visited, topo);
     }
     
     topo.push_back(t);
 }
-void Tensor::bacward()
-{
 
-    std::vector<Tensor*> topo;
+void Tensor::backward() {
+    std::vector<std::shared_ptr<Tensor>> topo;
     std::set<std::string> visited;
     
-    // Call the helper function to build the topology
-    visit_tensor(this, visited, topo);
+    auto self = std::shared_ptr<Tensor>(this, [](Tensor*) {});
+    visit_tensor(self, visited, topo);
+
     for (int i = topo.size() - 1; i >= 0; i--) {
         if (topo[i]->_backward) {
-            // (topo[i]->*(_backward))(); 
-            (topo[i]->*(topo[i]->_backward))();
-    }
+            (topo[i].get()->*(topo[i]->_backward))();
+        }
     }
 }

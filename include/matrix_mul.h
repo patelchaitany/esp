@@ -7,127 +7,208 @@
 #include <vector>
 #include <uuid/uuid.h>
 #include <functional>
+#include <memory>
 
 typedef float float32;
-
-//here data refers to genral term it can be any thing from the input to the weights or anything yo u can imagine.
-
 
 class Tensor {
     typedef float float32;
 public:
     uuid_t id;
     int rows, cols, batch;
-    std::set< Tensor > child;
-    float32 **data;
-    float32 **grad;
+    std::set<std::shared_ptr<Tensor>> child;
+    float32** data;  // Keep as raw pointer for direct access
+    float32** grad;  // Keep as raw pointer for direct access
     void (Tensor::*_backward)() = nullptr; 
     std::string name;
     std::string uuidstr;
-    Tensor(){
-        uuid_generate(id);
-        this->rows = 0;
-        this->cols = 0;
-        data = NULL;
-        _backward  = nullptr;
-        grad = NULL;
-    }
-    Tensor(int rows, int cols,std::set< Tensor > child = std::set< Tensor >(),std::string name = "") {
+private:
+    std::shared_ptr<float32*[]> data_holder;  // For memory management
+    std::shared_ptr<float32*[]> grad_holder;  // For memory management
+
+public:
+    // Default constructor - initialize with 1x1 tensor
+    Tensor() {
         uuid_generate(id);
         char uuid_str[37];
-         uuid_unparse(id, uuid_str);
-         uuidstr = std::string(uuid_str);
-        this->rows = rows;
-        this->cols = cols;
-        this->child = child;
-        this->name = name;
-        _backward = nullptr;
-
-        grad= (float32 **)malloc(rows * sizeof(float32*));
-
-            data = (float32 **)malloc(rows * sizeof(float32*));
-            for (int j = 0; j < rows; j++) {
-                data[j] = (float32 *)malloc(cols * sizeof(float32));
-                grad[j] = (float32 *)malloc(cols * sizeof(float32)); 
-                memset(data[j], 0, cols * sizeof(float32));
-                memset(grad[j], 0, cols * sizeof(float32));
-            }
+        uuid_unparse(id, uuid_str);
+        uuidstr = std::string(uuid_str);
         
+        this->rows = 1;
+        this->cols = 1;
+        this->name = "default";
+        this->_backward = nullptr;
+
+        // Allocate minimum memory for 1x1 tensor
+        data_holder = std::shared_ptr<float32*[]>(new float32*[1],
+            [](float32** p) {
+                delete[] p[0];
+                delete[] p;
+            });
+        
+        grad_holder = std::shared_ptr<float32*[]>(new float32*[1],
+            [](float32** p) {
+                delete[] p[0];
+                delete[] p;
+            });
+
+        data = data_holder.get();
+        grad = grad_holder.get();
+
+        data[0] = new float32[1]();  // Initialize to zero
+        grad[0] = new float32[1]();  // Initialize to zero
     }
-    Tensor(int rows,int cols,float32 **data,std::set< Tensor > child = std::set< Tensor>(),std::string name = "") {
+
+    Tensor(int rows, int cols, float32** input_data = nullptr, const std::set<Tensor>& old_child = {}, std::string name = "") {
         uuid_generate(id);
         char uuid_str[37];
-         uuid_unparse(id, uuid_str);
-         uuidstr = std::string(uuid_str);
+        uuid_unparse(id, uuid_str);
+        uuidstr = std::string(uuid_str);
+        
         this->rows = rows;
         this->cols = cols;
-        this->data = data;
-        this->child = child;
         this->name = name;
-        _backward  = nullptr;
+        this->_backward = nullptr;
 
-        grad = (float32 **)malloc(rows * sizeof(float32*));
-        for (int j = 0; j < rows; j++) {
-            grad[j] = (float32 *)malloc(cols * sizeof(float32));
-            memset(grad[j], 0, cols * sizeof(float32));
+        // Convert old_child to shared_ptr set
+        for (const auto& t : old_child) {
+            child.insert(std::make_shared<Tensor>(t));
         }
 
+        int r = rows;
+        data_holder = std::shared_ptr<float32*[]>(new float32*[r], 
+            [r](float32** p) {
+                for (int i = 0; i < r; i++) {
+                    delete[] p[i];
+                }
+                delete[] p;
+            });
+        
+        grad_holder = std::shared_ptr<float32*[]>(new float32*[r],
+            [r](float32** p) {
+                for (int i = 0; i < r; i++) {
+                    delete[] p[i];
+                }
+                delete[] p;
+            });
+
+        data = data_holder.get();
+        grad = grad_holder.get();
+
+        for (int j = 0; j < rows; j++) {
+            data[j] = new float32[cols]();  // Initialize to zero
+            grad[j] = new float32[cols]();  // Initialize to zero
+            if (input_data) {
+                memcpy(data[j], input_data[j], cols * sizeof(float32));
+            }
+        }
     }
 
-    Tensor(const Tensor &t) {
+    // Copy constructor
+    Tensor(const Tensor& t) {
         uuid_copy(this->id, t.id);
         char uuid_str[37];
-         uuid_unparse(t.id, uuid_str);
-         uuidstr = std::string(uuid_str);
+        uuid_unparse(t.id, uuid_str);
+        uuidstr = std::string(uuid_str);
+        
         this->rows = t.rows;
         this->cols = t.cols;
         this->name = t.name;
-        _backward = t._backward;
+        this->_backward = t._backward;
         
-        // Deep copy the child set pointers
+        // Copy child tensors
         this->child = t.child;
-        this->data = t.data;
-        this->grad = t.grad;
-        // Allocate and copy data arrays
-        // data = (float32 **)malloc(rows * sizeof(float32*));
-        // grad = (float32 **)malloc(rows * sizeof(float32*));
-        // for (int j = 0; j < rows; j++) {
-        //     data[j] = (float32 *)malloc(cols * sizeof(float32));
-        //     grad[j] = (float32 *)malloc(cols * sizeof(float32));
-        //     memcpy(data[j], t.data[j], cols * sizeof(float32));
-        //     memcpy(grad[j], t.grad[j], cols * sizeof(float32));
-        // }
+
+        int r = rows;
+        data_holder = std::shared_ptr<float32*[]>(new float32*[r],
+            [r](float32** p) {
+                for (int i = 0; i < r; i++) {
+                    delete[] p[i];
+                }
+                delete[] p;
+            });
+        
+        grad_holder = std::shared_ptr<float32*[]>(new float32*[r],
+            [r](float32** p) {
+                for (int i = 0; i < r; i++) {
+                    delete[] p[i];
+                }
+                delete[] p;
+            });
+
+        data = data_holder.get();
+        grad = grad_holder.get();
+
+        for (int j = 0; j < rows; j++) {
+            data[j] = new float32[cols];
+            grad[j] = new float32[cols];
+            if (t.data && t.data[j]) {
+                memcpy(data[j], t.data[j], cols * sizeof(float32));
+            }
+            if (t.grad && t.grad[j]) {
+                memcpy(grad[j], t.grad[j], cols * sizeof(float32));
+            }
+        }
     }
 
-    // ~Tensor() {
-    //         for (int j = 0; j < rows; j++) {
-    //             free(data[j]);
-    //             free(grad[j]);
-    //         }
-    //         // free(data);
-    //         // free(grad);
-    
-    // }
-    
+    // Move constructor
+    Tensor(Tensor&& t) noexcept {
+        uuid_copy(this->id, t.id);
+        this->uuidstr = std::move(t.uuidstr);
+        this->rows = t.rows;
+        this->cols = t.cols;
+        this->name = std::move(t.name);
+        this->_backward = t._backward;
+        this->child = std::move(t.child);
+        this->data_holder = std::move(t.data_holder);
+        this->grad_holder = std::move(t.grad_holder);
+        this->data = this->data_holder.get();
+        this->grad = this->grad_holder.get();
+        
+        t.data = nullptr;
+        t.grad = nullptr;
+        t.rows = 0;
+        t.cols = 0;
+    }
 
-    Tensor& operator=(const Tensor &t);
-    Tensor operator+(const Tensor &t) const;
-    Tensor operator/(const Tensor &t) const;
-    Tensor operator*(const Tensor &t) const;
-    Tensor operator^(const Tensor &t) const; // Custom operator for dot multiplication
+    void setGrad(float32** new_grad) {
+        int r = rows;
+        grad_holder = std::shared_ptr<float32*[]>(new float32*[r],
+            [r](float32** p) {
+                for (int i = 0; i < r; i++) {
+                    delete[] p[i];
+                }
+                delete[] p;
+            });
+        grad = grad_holder.get();
+        for (int j = 0; j < rows; j++) {
+            grad[j] = new float32[cols];
+            memcpy(grad[j], new_grad[j], cols * sizeof(float32));
+        }
+    }
+
+    Tensor& operator=(const Tensor& t);
+    Tensor operator+(const Tensor& t) const;
+    Tensor operator/(const Tensor& t) const;
+    Tensor operator*(const Tensor& t) const;
+    Tensor operator^(const Tensor& t) const;
+
     void backadd();
-    bool operator<(const Tensor &t) const {
+    void backward();
+
+    bool operator<(const Tensor& t) const {
         return uuid_compare(this->id, t.id) < 0;
     }
-    bool operator<(const Tensor* t) const{
-        return uuid_compare(this->id,t->id) <0;
+
+    bool operator<(const Tensor* t) const {
+        return uuid_compare(this->id, t->id) < 0;
     }
-    bool operator==(const Tensor &t) const {
+
+    bool operator==(const Tensor& t) const {
         return uuid_compare(this->id, t.id) == 0;
     }
-    bool operator==(const Tensor *t) const {
+
+    bool operator==(const Tensor* t) const {
         return uuid_compare(this->id, t->id) == 0;
     }
-    void bacward();
-
 };
