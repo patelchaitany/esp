@@ -9,30 +9,23 @@ Tensor& Tensor::operator=(const Tensor& t) {
         return *this;
     }
 
-    // Create an entirely new tensor
     Tensor* new_tensor = new Tensor(t.rows, t.cols);
-    // std::cout << "New tensor created\n";
-    // Copy the data from t
+
     for (int j = 0; j < t.rows; j++) {
         memcpy(new_tensor->data[j], t.data[j], t.cols * sizeof(float32));
     }
 
-    // Copy properties from t
     new_tensor->name = t.name;
     new_tensor->_backward = t._backward;
-    new_tensor->left = t.left;   // Share same children as t
+    new_tensor->left = t.left;   
     new_tensor->right = t.right;
     
-    // Clean up current data
     data_holder.reset();
     grad_holder.reset();
-    
-    // Move the new tensor's contents into this
-    // This is similar to Python's reference reassignment
+
     this->data_holder = std::move(new_tensor->data_holder);
     this->grad_holder = std::move(new_tensor->grad_holder);
-    // this->data_holder = new_tensor->data_holder;
-    // this->grad_holder = new_tensor->grad_holder;
+
     this->data = this->data_holder.get();
     this->grad = this->grad_holder.get();
     this->rows = new_tensor->rows;
@@ -40,12 +33,9 @@ Tensor& Tensor::operator=(const Tensor& t) {
     this->left = std::move(new_tensor->left);
     this->right = std::move(new_tensor->right);
     this->name = std::move(new_tensor->name);
-    // this->left = new_tensor->left;
-    // this->right = new_tensor->right;
-    // this->name = new_tensor->name;
+
     this->_backward = new_tensor->_backward;
-    
-    // Generate new UUID for this tensor
+
     uuid_generate(this->id);
     char uuid_str[37];
     uuid_unparse(this->id, uuid_str);
@@ -57,8 +47,7 @@ Tensor& Tensor::operator=(const Tensor& t) {
 
 Tensor Tensor::operator+(const Tensor &t) const {
     Tensor result(this->rows, this->cols);
-    
-    // Store intrusive_ptr to the original tensors
+
     result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
     result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
     result.name = this->name + "+" + t.name;
@@ -152,7 +141,7 @@ void Tensor::backmul(){
 }
 
 Tensor Tensor::operator^(const Tensor &t) const {
-    if (this->rows != t.rows || this->cols != t.cols || this->batch != t.batch) {
+    if (this->cols != 1 || t.cols !=1 || this ->rows != t.rows) {
         throw std::invalid_argument("Matrix dimensions do not match for dot multiplication");
     }
 
@@ -161,14 +150,27 @@ Tensor Tensor::operator^(const Tensor &t) const {
     result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
     result.name = this->name + "^" + t.name;
 
-    for (int i = 0; i < t.rows; i++) {
-        for (int j = 0; j < t.cols; j++) {
-            result.data[j][i] = t.data[i][j];
+    for (int i = 0;i<this->rows;i++){
+        for(int j = 0;j<t.rows;j++){
+            result.data[i][j] = this->data[i][0] * t.data[j][0];
         }
     }
+    result._backward = &Tensor::backdot;
     return result;
 }
 
+void Tensor::backdot(){
+    if(this->left){
+        for(int i = 0;i<this->rows;i++){
+            left->grad[i][0] += this->grad[0][0] * right->data[i][0];
+        }
+    }
+    if(this->right){
+        for(int i = 0;i<this->rows;i++){
+            right->grad[i][0] += this->grad[0][0] * left->data[i][0];
+        }
+    }
+}
 void visit_tensor(const boost::intrusive_ptr<Tensor>& t,
                  std::set<boost::intrusive_ptr<Tensor>>& visited,
                  std::vector<boost::intrusive_ptr<Tensor>>& topo) {

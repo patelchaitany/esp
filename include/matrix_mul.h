@@ -20,17 +20,16 @@ public:
     int rows, cols, batch;
     boost::intrusive_ptr<Tensor> left;
     boost::intrusive_ptr<Tensor> right;
-    float32** data;  // Keep as raw pointer for direct access
-    float32** grad;  // Keep as raw pointer for direct access
+    float32** data;  
+    float32** grad;  
     void (Tensor::*_backward)() = nullptr; 
     std::string name;
     std::string uuidstr;
 private:
-    std::shared_ptr<float32*[]> data_holder;  // For memory management
-    std::shared_ptr<float32*[]> grad_holder;  // For memory management
+    std::shared_ptr<float32*[]> data_holder;  
+    std::shared_ptr<float32*[]> grad_holder;  
 
 public:
-    // Default constructor - initialize with 1x1 tensor
     Tensor() {
         uuid_generate(id);
         char uuid_str[37];
@@ -44,7 +43,6 @@ public:
         this->left = nullptr;
         this->right = nullptr;
 
-        // Allocate minimum memory for 1x1 tensor
         data_holder = std::shared_ptr<float32*[]>(new float32*[1],
             [](float32** p) {
                 delete[] p[0];
@@ -60,8 +58,8 @@ public:
         data = data_holder.get();
         grad = grad_holder.get();
 
-        data[0] = new float32[1]();  // Initialize to zero
-        grad[0] = new float32[1]();  // Initialize to zero
+        data[0] = new float32[1]();  
+        grad[0] = new float32[1]();  
     }
 
     Tensor(int rows, int cols, float32** input_data = nullptr, std::string name = "") {
@@ -98,8 +96,8 @@ public:
         grad = grad_holder.get();
 
         for (int j = 0; j < rows; j++) {
-            data[j] = new float32[cols]();  // Initialize to zero
-            grad[j] = new float32[cols]();  // Initialize to zero
+            data[j] = new float32[cols]();  
+            grad[j] = new float32[cols](); 
             if (input_data) {
                 memcpy(data[j], input_data[j], cols * sizeof(float32));
             }
@@ -169,10 +167,10 @@ public:
         this->data = this->data_holder.get();
         this->grad = this->grad_holder.get();
         
-        // t.data = nullptr;
-        // t.grad = nullptr;
-        // t.rows = 0;
-        // t.cols = 0;
+        t.data = nullptr;
+        t.grad = nullptr;
+        t.rows = 0;
+        t.cols = 0;
     }
 
     void setGrad(float32** new_grad) {
@@ -200,7 +198,8 @@ public:
     void backadd();
     void backmul();
     void backward();
-
+    void backdot();
+    
     bool operator<(const Tensor& t) const {
         return uuid_compare(this->id, t.id) < 0;
     }

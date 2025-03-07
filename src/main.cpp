@@ -13,7 +13,7 @@ long getPeakMemoryUsage()
     struct rusage usage;
     if (getrusage(RUSAGE_SELF, &usage) == 0)
     {
-        return usage.ru_maxrss; // Peak memory usage in kilobytes
+        return usage.ru_maxrss;
     }
     else
     {
@@ -21,19 +21,19 @@ long getPeakMemoryUsage()
         return -1;
     }
 }
-// Wrapper class to manage intrusive_ptr internally
+
 class Value
 {
 public:
-    boost::intrusive_ptr<Tensor> ptr; // Intrusive pointer to manage Tensor object
-    // std::shared_ptr<Tensor> ptr; // Shared pointer to manage MyClass object
+    boost::intrusive_ptr<Tensor> ptr; 
+    boost::intrusive_ptr<Tensor>orig;
 public:
-    // Constructor
     Value()
     {
         ptr = nullptr;
+        orig = nullptr;
+        
     };
-    // Constructor from Tensor pointer
     explicit Value(Tensor* t)
     {
         ptr = t;
@@ -41,8 +41,8 @@ public:
     Value(int row, int cols, float **data, std::string name)
     {
         ptr = boost::intrusive_ptr<Tensor>(new Tensor(row, cols, data, name));
+        orig = ptr;
     }
-    // Overload + operator to create a new object
     Value& operator=(const Value &other)
     {
         if (this != &other) {
@@ -71,78 +71,71 @@ public:
     {
         ptr->setGrad(grad);
     }
-    // Print memory address (for demonstration)
-    void printAddress() const
-    {
-        std::cout << "Address: " << ptr.get() << std::endl;
-    }
+
     void backward()
     {
         ptr->backward();
     }
     void printgrad(){
-        for(int i = 0 ;i<ptr->rows;i++){
-            for(int j = 0;j<ptr->cols;j++){
-                std::cout << ptr->grad[i][j] << " ";
+        for(int i = 0 ;i<orig->rows;i++){
+            for(int j = 0;j<orig->cols;j++){
+                std::cout << orig->grad[i][j] << " ";
             }
             std::cout << std::endl;
         }
     }
+    void printdata(){
+        for(int i = 0 ;i<orig->rows;i++){
+            for(int j = 0;j<orig->cols;j++){
+                std::cout << orig->data[i][j] << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+    
 };
 
 int main()
 {
 
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
-    float data[2][2] = {{1, 2}, {3, 4}};
-    float data2[2][2] = {{5, 6}, {7, 8}};
-    float **data_ptr = (float **)malloc(2 * sizeof(float *));
-    for (int i = 0; i < 2; i++)
+    float data[1][2] = {{1, 2}};
+    float data2[2][1] = {{1}, {2}};
+    float **data_ptr = (float **)malloc(1 * sizeof(float *));
+    float **data_ptr2 = (float **)malloc(2 * sizeof(float *));
+    for (int i = 0; i < 1; i++)
     {
         data_ptr[i] = (float *)malloc(2 * sizeof(float));
         memcpy(data_ptr[i], data[i], 2 * sizeof(float));
     }
-    float **grad = (float **)malloc(2 * sizeof(float *));
     for (int i = 0; i < 2; i++)
     {
-        grad[i] = (float *)malloc(2 * sizeof(float));
-        for (int j = 0; j < 2; j++)
+        data_ptr2[i] = (float *)malloc(1 * sizeof(float));
+        memcpy(data_ptr2[i], data2[i], 1 * sizeof(float));
+    }
+    float **grad = (float **)malloc(1 * sizeof(float *));
+    for (int i = 0; i < 1; i++)
+    {
+        grad[i] = (float *)malloc(1 * sizeof(float));
+        for (int j = 0; j < 1; j++)
         {
             grad[i][j] = 1;
         }
     }
-    Value a(2, 2, data_ptr, "t1");
-    Value b(2, 2, data_ptr, "t2");
+    Value a(1, 2, data_ptr, "t1");
+    Value b(2, 1, data_ptr2, "t2");
     Value c;
-    // a.setgrad(grad);
-//0x55555559ae80
-    // b.setChild(a);
+    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
+    // a = a;
+    a = a*b;
+
+    // c = c*a;
+    a.setgrad(grad);
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
 
-    a.printAddress();
-    c = a;
-    c = c*b;
-    // for(int i = 0;i<100;i++){
-    //     if(i%2 == 0){
-            
-    //     }
-    //     c = c + a;
-    // }
-    c = c*a;
-    c.setgrad(grad);
-    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
-
-    a.printAddress();
-    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
-
-    std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
-
-    // std::cout << "After:  a.value = " << a.getValue() << " ";
-    a.printAddress();
-    c.backward();
+    // c.backward();
+    a.backward();
     a.printgrad();
-    // b.printgrad();
-    // std::cout << "b.value = " << b.child.get()  << std::endl;
 
     return 0;
 }
