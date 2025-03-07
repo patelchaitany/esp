@@ -188,17 +188,33 @@ public:
             memcpy(grad[j], new_grad[j], cols * sizeof(float32));
         }
     }
-
     Tensor& operator=(const Tensor& t);
     Tensor operator+(const Tensor& t) const;
     Tensor operator/(const Tensor& t) const;
     Tensor operator*(const Tensor& t) const;
     Tensor operator^(const Tensor& t) const;
+    Tensor operator-(const Tensor& t) const;
 
     void backadd();
     void backmul();
     void backward();
     void backdot();
+    void backsub();
+
+    void update(float32 learning_rate) {
+        for (int i = 0; i < this->rows; i++) {
+            for (int j = 0; j < this->cols; j++) {
+                data[i][j] -= learning_rate * grad[i][j];
+            }
+        }
+    }
+    void setgradzero() {
+        for (int i = 0; i < this->rows; i++) {
+            for (int j = 0; j < this->cols; j++) {
+                grad[i][j] = 0;
+            }
+        }
+    }
     
     bool operator<(const Tensor& t) const {
         return uuid_compare(this->id, t.id) < 0;

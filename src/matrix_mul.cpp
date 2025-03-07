@@ -60,6 +60,38 @@ Tensor Tensor::operator+(const Tensor &t) const {
     return result;
 }
 
+Tensor Tensor::operator-(const Tensor &t) const {
+    Tensor result(this->rows, this->cols);
+    result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
+    result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
+    result.name = this->name + "-" + t.name;
+
+    for (int j = 0; j < rows; j++) {
+        for (int k = 0; k < cols; k++) {
+            result.data[j][k] = this->data[j][k] - t.data[j][k];
+        }
+    }
+    result._backward = &Tensor::backsub;
+    return result;
+}
+
+void Tensor::backsub(){
+    if(this->left){
+        for(int i = 0;i<this->rows;i++){
+            for(int j = 0;j<this->cols;j++){
+                left->grad[i][j] = left->grad[i][j] + this->grad[i][j];
+            }
+        }
+    }
+    if(this->right){
+        for(int i = 0;i<this->rows;i++){
+            for(int j = 0;j<this->cols;j++){
+                right->grad[i][j] = right->grad[i][j] - this->grad[i][j];
+            }
+        }
+    }
+}
+
 void Tensor::backadd() {
     if (this->left) {
         for (int i = 0; i < this->rows; i++) {
@@ -124,6 +156,7 @@ void Tensor::backmul(){
         for(int i = 0; i<this->rows;i++){
             for(int j = 0;j<this->right->rows;j++){
                 for(int k = 0;k<this->cols;k++){
+                    float temp = this->grad[i][j] * right->data[j][k];
                     left->grad[i][j] += this->grad[i][k] * right->data[j][k];
                 }
             }
@@ -133,6 +166,7 @@ void Tensor::backmul(){
         for(int i = 0;i<this->left->cols;i++){
             for(int j = 0;j<this->cols;j++){
                 for(int k = 0;k<this->rows;k++){
+                    float temp = this->grad[k][j] * left->data[k][i];
                     right->grad[i][j] += this->grad[k][j] * left->data[k][i];
                 }
             }
@@ -145,15 +179,13 @@ Tensor Tensor::operator^(const Tensor &t) const {
         throw std::invalid_argument("Matrix dimensions do not match for dot multiplication");
     }
 
-    Tensor result(t.cols, t.rows);
+    Tensor result(t.cols, t.cols);
     result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
     result.right = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(&t));
     result.name = this->name + "^" + t.name;
 
     for (int i = 0;i<this->rows;i++){
-        for(int j = 0;j<t.rows;j++){
-            result.data[i][j] = this->data[i][0] * t.data[j][0];
-        }
+        result.data[0][0] += this->data[i][0] * t.data[i][0];
     }
     result._backward = &Tensor::backdot;
     return result;
@@ -161,12 +193,14 @@ Tensor Tensor::operator^(const Tensor &t) const {
 
 void Tensor::backdot(){
     if(this->left){
-        for(int i = 0;i<this->rows;i++){
+        for(int i = 0;i<this->left->rows;i++){
+            float temp = this->grad[0][0] * right->data[i][0];
             left->grad[i][0] += this->grad[0][0] * right->data[i][0];
         }
     }
     if(this->right){
-        for(int i = 0;i<this->rows;i++){
+        for(int i = 0;i<this->right->rows;i++){
+            float temp = this->grad[0][0] * left->data[i][0];
             right->grad[i][0] += this->grad[0][0] * left->data[i][0];
         }
     }
@@ -205,5 +239,13 @@ void Tensor::backward() {
         if (topo[i]->_backward) {
             (topo[i].get()->*(topo[i]->_backward))();
         }
+        // Free left and right child tensors after computation
+    }
+    for(int i = 0;i<topo.size();i++){
+        topo[i]->left = nullptr;
+        topo[i]->right = nullptr;
+        topo[i]->_backward = nullptr;
     }
 }
+
+
