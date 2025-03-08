@@ -2,7 +2,42 @@
 #include <memory>
 #include <unordered_set>
 #include <cstring>
+#include <cmath>   
 #include <boost/smart_ptr/intrusive_ptr.hpp>
+
+const float CLIP_NORM = 1.0f;
+const float MIN_GRAD_NORM = 1e-3f;  
+const float EPSILON = 1e-6f;        
+
+void clip_gradient(float** grad, int rows, int cols) {
+    float norm = 0.0f;
+
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++) {
+            if (!std::isfinite(grad[i][j])) { 
+                grad[i][j] = 0.0f;
+            }
+            norm += grad[i][j] * grad[i][j];
+        }
+    }
+    norm = sqrt(norm + EPSILON); 
+    if (norm > CLIP_NORM) {
+        float scale = CLIP_NORM / norm;
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                grad[i][j] *= scale;
+            }
+        }
+    }
+    else if (norm < MIN_GRAD_NORM) {
+        float scale = MIN_GRAD_NORM / (norm + EPSILON);
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                grad[i][j] *= scale;  
+            }
+        }
+    }
+}
 
 Tensor& Tensor::operator=(const Tensor& t) {
     if (this == &t) {
@@ -82,6 +117,7 @@ void Tensor::backsub(){
                 left->grad[i][j] = left->grad[i][j] + this->grad[i][j];
             }
         }
+        clip_gradient(left->grad,this->left->rows, this->left->cols);
     }
     if(this->right){
         for(int i = 0;i<this->rows;i++){
@@ -89,6 +125,7 @@ void Tensor::backsub(){
                 right->grad[i][j] = right->grad[i][j] - this->grad[i][j];
             }
         }
+        clip_gradient(right->grad, this->right->rows, this->right->cols);
     }
 }
 
@@ -99,6 +136,7 @@ void Tensor::backadd() {
                 left->grad[i][j] = left->grad[i][j] + this->grad[i][j];
             }
         }
+        clip_gradient(left->grad,this->left->rows, this->left->cols);
     }
     if (this->right) {
         for (int i = 0; i < this->rows; i++) {
@@ -106,6 +144,7 @@ void Tensor::backadd() {
                 right->grad[i][j] = right->grad[i][j] + this->grad[i][j];
             }
         }
+        clip_gradient(right->grad, this->right->rows, this->right->cols);
     }
 }
 
@@ -156,21 +195,21 @@ void Tensor::backmul(){
         for(int i = 0; i<this->rows;i++){
             for(int j = 0;j<this->right->rows;j++){
                 for(int k = 0;k<this->cols;k++){
-                    float temp = this->grad[i][j] * right->data[j][k];
                     left->grad[i][j] += this->grad[i][k] * right->data[j][k];
                 }
             }
         }
+        clip_gradient(left->grad,this->left->rows, this->left->cols);
     }
     if(this->right){
         for(int i = 0;i<this->left->cols;i++){
             for(int j = 0;j<this->cols;j++){
                 for(int k = 0;k<this->rows;k++){
-                    float temp = this->grad[k][j] * left->data[k][i];
                     right->grad[i][j] += this->grad[k][j] * left->data[k][i];
                 }
             }
         }
+        clip_gradient(right->grad, this->right->rows, this->right->cols);
     }
 }
 
@@ -194,17 +233,43 @@ Tensor Tensor::operator^(const Tensor &t) const {
 void Tensor::backdot(){
     if(this->left){
         for(int i = 0;i<this->left->rows;i++){
-            float temp = this->grad[0][0] * right->data[i][0];
-            left->grad[i][0] += this->grad[0][0] * right->data[i][0];
+            left->grad[i][0] += ((this->grad[0][0] * right->data[i][0]));
         }
+        clip_gradient(left->grad,this->left->rows, this->left->cols);
     }
     if(this->right){
         for(int i = 0;i<this->right->rows;i++){
-            float temp = this->grad[0][0] * left->data[i][0];
-            right->grad[i][0] += this->grad[0][0] * left->data[i][0];
+            right->grad[i][0] += (this->grad[0][0] * left->data[i][0]);
         }
+        clip_gradient(right->grad, this->right->rows, this->right->cols);
     }
 }
+
+Tensor Tensor::lekyrelu(float leaky){
+    Tensor result(this->rows, this->cols);
+    result.left = boost::intrusive_ptr<Tensor>(const_cast<Tensor*>(this));
+    result.name = this->name + "leakyrelu";
+    for (int i = 0; i < this->rows; i++) {
+        for (int j = 0; j < this->cols; j++) {
+            result.data[i][j] = this->data[i][j] > 0 ? this->data[i][j] : leaky * this->data[i][j];
+        }
+    }
+    result._backward = &Tensor::backleakyrelu;
+    return result;
+}
+
+void Tensor::backleakyrelu() {
+    if (this->left) {
+        for (int i = 0; i < this->rows; i++) {
+            for (int j = 0; j < this->cols; j++) {
+                left->grad[i][j] += (this->data[i][j]) > 0 ? this->grad[i][j] : 0.01 * this->grad[i][j];
+            }
+        }
+        clip_gradient(left->grad,this->left->rows, this->left->cols);
+    }
+}
+
+
 void visit_tensor(const boost::intrusive_ptr<Tensor>& t,
                  std::set<boost::intrusive_ptr<Tensor>>& visited,
                  std::vector<boost::intrusive_ptr<Tensor>>& topo) {

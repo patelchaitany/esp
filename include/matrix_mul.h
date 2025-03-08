@@ -194,12 +194,15 @@ public:
     Tensor operator*(const Tensor& t) const;
     Tensor operator^(const Tensor& t) const;
     Tensor operator-(const Tensor& t) const;
+    
+    Tensor lekyrelu(float leaky = 0.01);
 
     void backadd();
     void backmul();
     void backward();
     void backdot();
     void backsub();
+    void backleakyrelu();
 
     void update(float32 learning_rate) {
         for (int i = 0; i < this->rows; i++) {

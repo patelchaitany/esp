@@ -9,6 +9,7 @@
 #include <cmath>
 #include <random>
 #include <boost/smart_ptr/intrusive_ptr.hpp>
+#include <value.h>
 
 long getPeakMemoryUsage()
 {
@@ -24,156 +25,32 @@ long getPeakMemoryUsage()
     }
 }
 
-class Value
+float mmse(Value &y_true, Value &y_pred)
 {
-public:
-    mutable boost::intrusive_ptr<Tensor> ptr;
-    boost::intrusive_ptr<Tensor> orig;
-
-public:
-    Value()
-    {
-        ptr = nullptr;
-        orig = nullptr;
-    };
-
-    explicit Value(Tensor *t)
-    {
-        ptr = t;
+    float result = 0.0f;
+    if(y_true.ptr->rows != y_pred.ptr->rows || y_true.ptr->cols != y_pred.ptr->cols){
+        std::cerr << "Error: y_true and y_pred must have the same shape" << std::endl;
+        return result;
     }
-
-    Value(int row, int cols, float **data, std::string name)
+    for (int i = 0; i < y_true.ptr->rows; i++)
     {
-        ptr = boost::intrusive_ptr<Tensor>(new Tensor(row, cols, data, name));
-        orig = ptr;
-    }
-
-    Value &operator=(const Value &other)
-    {
-        if (this != &other)
+        for (int j = 0; j < y_true.ptr->cols; j++)
         {
-            ptr = other.ptr;
+            result += (y_true.ptr->data[i][j] - y_pred.ptr->data[i][j]) * (y_true.ptr->data[i][j] - y_pred.ptr->data[i][j]);
         }
-        return *this;
     }
-
-    Value operator+(const Value &other) const
-    {
-        if (ptr->_backward == nullptr && orig != nullptr)
+    result /= (float)(y_true.ptr->rows * y_true.ptr->cols);
+    if(y_pred.ptr->grad){
+        for (int i = 0; i < y_pred.ptr->rows; i++)
         {
-            this->ptr = this->orig;
-        }
-        return Value(new Tensor(*ptr + *other.ptr));
-    }
-
-    Value operator*(const Value &other) const
-    {
-        if (ptr->_backward == nullptr && orig != nullptr)
-        {
-            this->ptr = this->orig;
-        }
-        return Value(new Tensor(*ptr * *other.ptr));
-    }
-
-    Value operator^(const Value &other) const
-    {
-        if (ptr->_backward == nullptr && orig != nullptr)
-        {
-            this->ptr = this->orig;
-        }
-        return Value(new Tensor(*ptr ^ *other.ptr));
-    }
-
-    Value operator/(const Value &other) const
-    {
-        if (ptr->_backward == nullptr && orig != nullptr)
-        {
-            this->ptr = this->orig;
-        }
-        return Value(new Tensor(*ptr / *other.ptr));
-    }
-    Value operator-(const Value &other) const
-    {
-        if (ptr->_backward == nullptr && orig != nullptr)
-        {
-            this->ptr = this->orig;
-        }
-        return Value(new Tensor(*ptr - *other.ptr));
-    }
-
-    void setgrad(float **grad)
-    {
-        ptr->setGrad(grad);
-    }
-    void setgradzero()
-    {
-        if(this->ptr){ptr->setgradzero();}
-        if(this->orig){orig->setgradzero();}
-    }
-    void backward()
-    {
-        ptr->backward();
-    }
-
-    void printgrad()
-    {
-        if (orig == nullptr)
-        {
-            for (int i = 0; i < ptr->rows; i++)
+            for (int j = 0; j < y_pred.ptr->cols; j++)
             {
-                for (int j = 0; j < ptr->cols; j++)
-                {
-                    std::cout << ptr->grad[i][j] << " ";
-                }
-                std::cout << std::endl;
-            }
-        }
-        else
-        {
-            for (int i = 0; i < orig->rows; i++)
-            {
-                for (int j = 0; j < orig->cols; j++)
-                {
-                    std::cout << orig->grad[i][j] << " ";
-                }
-                std::cout << std::endl;
+                y_pred.ptr->grad[i][j] = (2.0f *( (y_pred.ptr->data[i][j] - y_true.ptr->data[i][j])/(float)(y_pred.ptr->rows * y_pred.ptr->cols)));
             }
         }
     }
-
-    void printdata()
-    {
-        if (orig != nullptr)
-        {
-            std::cout<<"Original Data"<<orig->name<<std::endl;
-            for (int i = 0; i < orig->rows; i++)
-            {
-                for (int j = 0; j < orig->cols; j++)
-                {
-                    std::cout << orig->data[i][j] << " ";
-                }
-                std::cout << std::endl;
-            }
-        }
-        else
-        {
-            std::cout<<"Data"<<ptr->name<<std::endl;
-            for (int i = 0; i < ptr->rows; i++)
-            {
-                for (int j = 0; j < ptr->cols; j++)
-                {
-                    std::cout << ptr->data[i][j] << " ";
-                }
-                std::cout << std::endl;
-            }
-        }
-    }
-    void update(float learning_rate)
-    {
-        this->ptr = this->orig;
-        orig->update(learning_rate);
-    }
-};
+    return result;
+}
 
 // Helper function to create data array
 float **create_data_array(int rows, int cols, std::function<float(int, int)> init_func)
@@ -195,23 +72,27 @@ int main()
     std::cout << "Peak Memory Usage: " << getPeakMemoryUsage() << " KB" << std::endl;
 
     // Training parameters
-    const int num_points = 2;          // Reduced for better visualization
-    const float learning_rate = 0.05f; // Increased for faster convergence
+    const int num_points = 100;          // Reduced for better visualization
+    const float learning_rate = 0.01f; // Increased for faster convergence
     const int epochs = 500;
 
     std::cout << "Starting neural network training...\n"
               << std::endl;
 
     // Create training data (x: num_points x 1, y: num_points x 1)
-    float **x_data = create_data_array(num_points, 1, [num_points](int i, int j)
-                                       { return (float)i / num_points * 2 * M_PI; });
+    float **x_data = create_data_array(num_points, 2, [num_points](int i, int j)
+                                       { 
+                                        // if(j==1) return (float)((float)i / num_points * 2 * M_PI)*(float)((float)i / num_points * 2 * M_PI);
+                                        if(j==1) return 1.0f;
+                                        return (float)((float)i / num_points * 2.0f* M_PI); 
+                                    });
 
-    float **y_data = create_data_array(num_points, 1, [](int i, int j)
+    float **y_data = create_data_array(num_points, 1, [num_points](int i, int j)
                                        {
-                                           return std::sin((float)i / 20 * 2 * M_PI); // Fixed constant to match num_points
+                                           return std::sin((float)i / num_points * 2 * M_PI); // Fixed constant to match num_points
                                        });
 
-    Value x_train(num_points, 1, x_data, "x_train");
+    Value x_train(num_points, 2, x_data, "x_train");
     Value y_train(num_points, 1, y_data, "y_train");
 
     // Initialize weights and bias (W: 1 x 1, b: 1 x 1)
@@ -219,54 +100,79 @@ int main()
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
 
-    float **w_data = create_data_array(1, 1, [&dis, &gen](int i, int j)
+    float **w_data = create_data_array(2,6, [&dis, &gen](int i, int j)
                                        { return dis(gen); });
+
+    float **w_data1 = create_data_array(6,1, [&dis, &gen](int i, int j)
+                                       { return dis(gen); }); 
 
     float **b_data = create_data_array(1, 1, [&dis, &gen](int i, int j)
                                        { return dis(gen); });
 
-    Value W(1, 1, w_data, "W"); // Single weight
+    Value W1(2, 6, w_data, "W1"); // Single weight
+    Value W2(6, 1, w_data1, "W2"); // Single weight
     Value b(1, 1, b_data, "b"); // Single bias
-    x_train.printdata();
-    y_train.printdata();
-    W.printdata();
-    b.printdata();
+    // x_train.printdata();
+    // y_train.printdata();
+    // W.printdata();
+    // b.printdata();
 
     // Training loop
-    for (int epoch = 0; epoch < 10; epoch++)
+    for (int epoch = 0; epoch < 10000; epoch++)
     {
-        // Forward pass - compute predictions
-        // // Forward pass
-        // float dW = 0.0f; // Accumulate gradients for W
-        // float db = 0.0f; // Accumulate gradients for b
         float loss = 0.0f;
         Value out;
-        // Compute predictions and accumulate gradients
-        // for(int i = 0; i < num_points; i++) {
-        //     float x = x_train.orig->data[i][0];
-        //     float y = y_train.orig->data[i][0];
 
-        //     // Forward pass for this point
-        //     float pred = W.orig->data[0][0] * x + b.orig->data[0][0];
+        out = x_train * W1; //+ b;
+        out = out.leakyrelu();
+        out = out * W2;
+        // float array[2][6];
+        // for(int i=0;i<2;i++){
+        //     for(int j=0;j<6;j++){
+        //         array[i][j] = W1.ptr->data[i][j];
+        //     }
+        // }
+        // float array1[6][1];
+        // for(int i=0;i<6;i++){
+        //     for(int j=0;j<1;j++){
+        //         array1[i][j] = W2.ptr->data[i][j];
+        //     }
+        // }
+        // Value error = (y_train - out)^(y_train - out);
+        // // out.setgrad(create_data_array(num_points, 2, [](int i, int j)
+        //                             //   { return 0.00001; }));
+        // error.setgrad(create_data_array(num_points, 2, [](int i, int j)
+        //                               { return 0.0000001; }));
+        // // out.backward();
+        // error.backward();
+        loss = mmse(y_train, out);
+        out.backward();
 
-        //     // Compute error and contribution to loss
-        //     float error = pred - y;
-        //     loss += error * error;
-
-        //     // Accumulate gradients
-        //     dW += error * x;  // d(MSE)/dW = 2 * error * x
-        //     db += error;      // d(MSE)/db = 2 * error
+        // float grad1[2][6];
+        // for(int i=0;i<2;i++){
+        //     for(int j=0;j<6;j++){
+        //         grad1[i][j] = W1.orig->grad[i][j];
+        //     }
+        // }
+        // float grad2[6][1];  
+        // for(int i=0;i<6;i++){
+        //     for(int j=0;j<1;j++){
+        //         grad2[i][j] = W2.orig->grad[i][j];
+        //     }
         // }
 
-        out = x_train * W; //+ b;
-        Value error = (y_train - out)^(y_train - out);
-        error.setgrad(create_data_array(num_points, 1, [](int i, int j)
-                                      { return 1; }));
-        error.backward();
-        W.update(learning_rate);
+        // float grad3[num_points][2];
+        // for(int i=0;i<num_points;i++){
+        //     for(int j=0;j<2;j++){
+        //         grad3[i][j] = out.ptr->grad[i][j];
+        //     }
+        // }
+
+        W1.update(learning_rate);
+        W2.update(learning_rate);
         b.update(learning_rate);
-        error.setgradzero();
-        W.setgradzero();
+        W1.setgradzero();
+        W2.setgradzero();
         b.setgradzero();
         out.setgradzero();
 
@@ -278,22 +184,22 @@ int main()
         {
             std::cout << "Epoch " << epoch << ": ";
             std::cout << "Loss = " << loss << ", ";
-            std::cout << "W = " << W.orig->data[0][0] << ", ";
+            std::cout << "W = " << W1.orig->data[0][0] << ", ";
             std::cout << "b = " << b.orig->data[0][0];
 
             // Print predictions for a few points
-            if (epoch % 100 == 0)
-            {
-                std::cout << "\nPredictions vs Actual:";
-                for (int i = 0; i < num_points; i += 4)
-                { // Sample every 4th point
-                    float x = x_train.orig->data[i][0];
-                    float y_actual = y_train.orig->data[i][0];
-                    float y_pred = W.orig->data[0][0] * x + b.orig->data[0][0];
-                    std::cout << "\nx = " << x << ": pred = " << y_pred << ", actual = " << y_actual;
-                }
-                std::cout << "\n";
-            }
+            // if (epoch % 100 == 0)
+            // {
+            //     std::cout << "\nPredictions vs Actual:";
+            //     for (int i = 0; i < num_points; i += 4)
+            //     { // Sample every 4th point
+            //         float x = x_train.orig->data[i][0];
+            //         float y_actual = y_train.orig->data[i][0];
+            //         float y_pred = W.orig->data[0][0] * x + b.orig->data[0][0];
+            //         std::cout << "\nx = " << x << ": pred = " << y_pred << ", actual = " << y_actual;
+            //     }
+            //     std::cout << "\n";
+            // }
             std::cout << std::endl;
         }
     }
@@ -301,7 +207,8 @@ int main()
     // Print final parameters
     std::cout << "\nFinal parameters:" << std::endl;
     std::cout << "W: ";
-    W.printdata();
+    W1.printdata();
+    W2.printdata();
     std::cout << "b: ";
     b.printdata();
 
@@ -309,10 +216,17 @@ int main()
     std::cout << "\nTesting the model:" << std::endl;
     for (float x = 0; x <= 2 * M_PI; x += M_PI / 4)
     {
-        float **input_data = create_data_array(1, 1, [x](int i, int j)
-                                               { return x; });
-        Value input(1, 1, input_data, "test_input");
-        Value pred = (W * input); // + b;
+        float **input_data = create_data_array(1, 2, [x](int i, int j)
+                                       { 
+                                        // if(j==1) return (float)((float)i / num_points * 2 * M_PI)*(float)((float)i / num_points * 2 * M_PI);
+                                        if(j==1) return 1.0f;
+                                        return (float)(x); 
+                                    });
+        Value input(1, 2, input_data, "test_input");
+        // input.printdata();
+        Value pred = (input*W1); // + b;
+        pred = pred.leakyrelu();
+        pred = pred * W2;
         std::cout << "x = " << x << ", sin(x) = " << std::sin(x) << ", pred = ";
         pred.printdata();
 
